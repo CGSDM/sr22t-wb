@@ -1,0 +1,114 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="SR22T W&B"><title>SR22T Weight & Balance</title>
+<style>
+body{font-family:-apple-system,Segoe UI,Arial,sans-serif;margin:0;padding:12px;max-width:760px;margin:auto;background:#f4f6f8;color:#111}
+h1{font-size:20px;margin:4px 0}h2{font-size:15px;margin:14px 0 6px}
+.card{background:#fff;border-radius:10px;padding:10px 12px;margin:10px 0;box-shadow:0 1px 3px #0002}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:4px 3px;text-align:right}th:first-child,td:first-child{text-align:left}
+input{width:100%;box-sizing:border-box;font-size:16px;padding:6px;border:1px solid #bbb;border-radius:6px;text-align:right}
+.warn{background:#fff3cd;border:2px solid #e0a800;padding:8px;border-radius:8px;font-size:13px}
+.res{font-size:16px;font-weight:700;padding:10px;border-radius:8px;margin-top:8px}
+.ok{background:#d4edda;color:#155724}.bad{background:#f8d7da;color:#721c24}.unv{background:#e2e3e5;color:#383d41}
+canvas{width:100%;background:#fff;border:1px solid #ccc;border-radius:8px}
+button{font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid #888;background:#fff;margin:3px}
+.small{font-size:12px;color:#555}textarea{width:100%;height:90px;font-family:monospace;font-size:12px;box-sizing:border-box}
+</style></head><body>
+<h1>Cirrus SR22T Weight &amp; Balance</h1>
+<div class="warn"><b>Check before use.</b> Loaded from your W&amp;B data: empty weight 2436.9 lb at 138.86 in, max weight 3400 lb, POH station arms, and the P-8 moment limits table. Still confirm the fuel density, max baggage, usable fuel, and ramp/landing weights in setup, then tick the box at the bottom of the setup section. Until then results show as UNVERIFIED. This is a planning aid; the POH and your aircraft's actual W&amp;B report govern.</div>
+
+<div class="card"><h2>Loading</h2>
+<table id="load"><tr><th>Item</th><th>Weight (lb)</th><th>Arm (in)</th><th>Moment</th></tr></table>
+<div class="small">Fuel: enter US gallons (converted at the fuel density in setup). Takeoff fuel burn for taxi can be entered as a negative value in setup if you want ramp vs. takeoff weights.</div>
+</div>
+
+<div class="card"><h2>Result</h2>
+<table id="sum"></table>
+<div id="status" class="res unv"></div>
+<canvas id="cv" width="700" height="420"></canvas>
+</div>
+
+<div class="card"><h2>Setup (your airplane)</h2>
+<table id="cfg"></table>
+<h2>Envelope polygon</h2>
+<div class="small">One point per line as <code>CG_in, Weight_lb</code>, in order around the envelope. Copy from POH Section 6.</div>
+<textarea id="env"></textarea>
+<label><input type="checkbox" id="ver" style="width:auto"> I have checked every value in this setup against my POH and W&B report.</label><br>
+<button onclick="saveCfg()">Save setup</button><button onclick="resetCfg()">Reset to placeholders</button>
+</div>
+<script>
+const DEF={
+ ew:{l:"Empty weight (lb)",v:2436.9},em:{l:"Empty arm (in)",v:138.86},
+ mtow:{l:"Max takeoff weight (lb)",v:3400},mramp:{l:"Max ramp weight (lb)",v:3400},mlw:{l:"Max landing weight (lb)",v:3400},
+ dens:{l:"Fuel density (lb/gal)",v:6.0},maxfuel:{l:"Usable fuel (gal)",v:92},
+ aF:{l:"Front seats arm (in)",v:143.5},aR:{l:"Rear seats arm (in)",v:180.0},aB:{l:"Baggage arm (in)",v:208.0},aFu:{l:"Fuel arm (in)",v:154.9},
+ maxbag:{l:"Max baggage (lb)",v:130},burn:{l:"Trip fuel burn (gal) for landing CG",v:30},
+ env:"138.18,2200\n138.22,2250\n138.26,2300\n138.72,2350\n138.75,2400\n138.78,2450\n138.80,2500\n138.82,2550\n139.23,2600\n139.25,2650\n138.89,2700\n139.27,2750\n139.29,2800\n139.65,2850\n140.00,2900\n140.34,2950\n140.33,3000\n140.66,3050\n140.97,3100\n140.95,3150\n141.25,3200\n141.54,3250\n141.52,3300\n141.79,3350\n142.06,3400\n148.24,3400\n148.06,3350\n148.18,3300\n148.00,3250\n148.12,3200\n148.25,3150\n148.06,3100\n148.20,3050\n148.00,3000\n148.14,2950\n148.28,2900\n148.07,2850\n148.21,2800\n148.00,2750\n148.15,2700\n147.92,2650\n148.08,2600\n148.24,2550\n148.00,2500\n148.16,2450\n147.92,2400\n148.09,2350\n148.26,2300\n148.00,2250\n148.18,2200"
+};
+let C=JSON.parse(localStorage.getItem("sr22tcfg")||"null")||JSON.parse(JSON.stringify(DEF));
+const items=[["Pilot + front pax","aF"],["Rear passengers","aR"],["Baggage","aB"],["Fuel (gal)","aFu"]];
+const L=JSON.parse(localStorage.getItem("sr22tload")||'{"0":340,"1":0,"2":20,"3":60}');
+function build(){
+ const t=document.getElementById("load");
+ while(t.rows.length>1)t.deleteRow(1);
+ items.forEach((it,i)=>{const r=t.insertRow();
+  r.innerHTML=`<td>${it[0]}</td><td><input type=number inputmode=decimal id=w${i} value="${L[i]}" oninput="calc()"></td><td id=a${i}></td><td id=m${i}></td>`;});
+ const c=document.getElementById("cfg");c.innerHTML="";
+ Object.keys(DEF).filter(k=>k!="env").forEach(k=>{const r=c.insertRow();
+  r.innerHTML=`<td>${DEF[k].l}</td><td><input type=number inputmode=decimal step=any id=c_${k} value="${C[k].v}" oninput="calc()"></td>`;});
+ document.getElementById("env").value=C.env;
+ document.getElementById("ver").checked=!!C.ver;
+ document.getElementById("env").oninput=calc;document.getElementById("ver").onchange=calc;
+}
+function cfgv(k){return parseFloat(document.getElementById("c_"+k).value)||0}
+function env(){return document.getElementById("env").value.split("\n").map(s=>s.split(",").map(parseFloat)).filter(p=>p.length==2&&!isNaN(p[0])&&!isNaN(p[1]))}
+function inside(pt,poly){let [x,y]=pt,ins=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const [xi,yi]=poly[i],[xj,yj]=poly[j];
+ if((yi>y)!=(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi)ins=!ins}return ins}
+function calc(){
+ const dens=cfgv("dens");let rows=[["Empty",cfgv("ew"),cfgv("em")]];
+ items.forEach((it,i)=>{let w=parseFloat(document.getElementById("w"+i).value)||0;L[i]=w;
+  const arm=cfgv(it[1]);let lb=i==3?w*dens:w;rows.push([it[0],lb,arm]);
+  document.getElementById("a"+i).textContent=arm.toFixed(1);document.getElementById("m"+i).textContent=(lb*arm/1000).toFixed(1);});
+ localStorage.setItem("sr22tload",JSON.stringify(L));
+ const tot=rows.reduce((a,r)=>[a[0]+r[1],a[1]+r[1]*r[2]],[0,0]);
+ const W=tot[0],cg=W?tot[1]/W:0;
+ const burn=cfgv("burn")*dens,aF=cfgv("aFu");
+ const W2=W-burn,cg2=W2?(tot[1]-burn*aF)/W2:0;
+ const poly=env();
+ const gal=parseFloat(document.getElementById("w3").value)||0, bag=parseFloat(document.getElementById("w2").value)||0;
+ let msgs=[];
+ if(W>cfgv("mramp"))msgs.push("Over max ramp weight");
+ if(W>cfgv("mtow"))msgs.push("Over max takeoff weight by "+(W-cfgv("mtow")).toFixed(0)+" lb");
+ if(W2>cfgv("mlw"))msgs.push("Over max landing weight");
+ if(gal>cfgv("maxfuel"))msgs.push("Fuel exceeds usable");
+ if(bag>cfgv("maxbag"))msgs.push("Baggage over limit");
+ if(poly.length>2){if(!inside([cg,W],poly))msgs.push("Takeoff CG outside envelope");if(!inside([cg2,W2],poly))msgs.push("Landing CG outside envelope");}else msgs.push("No envelope defined");
+ document.getElementById("sum").innerHTML=`<tr><th></th><th>Weight</th><th>CG (in)</th><th>Moment/1000</th></tr>
+ <tr><td>Takeoff</td><td>${W.toFixed(0)}</td><td>${cg.toFixed(2)}</td><td>${(tot[1]/1000).toFixed(1)}</td></tr>
+ <tr><td>Landing (after ${cfgv("burn")} gal)</td><td>${W2.toFixed(0)}</td><td>${cg2.toFixed(2)}</td><td>${((tot[1]-burn*aF)/1000).toFixed(1)}</td></tr>
+ <tr><td>Useful load remaining to MTOW</td><td>${(cfgv("mtow")-W).toFixed(0)}</td><td></td><td></td></tr>`;
+ const s=document.getElementById("status");
+ const ver=document.getElementById("ver").checked;
+ if(!ver){s.className="res unv";s.textContent="UNVERIFIED (setup not confirmed). "+(msgs.join("; ")||"Looks inside limits, pending confirmation.");}
+ else if(msgs.length){s.className="res bad";s.textContent="NOT WITHIN LIMITS: "+msgs.join("; ");}
+ else{s.className="res ok";s.textContent="Within limits (takeoff and landing).";}
+ draw(poly,[[cg,W],[cg2,W2]]);
+}
+function draw(poly,pts){
+ const cv=document.getElementById("cv"),g=cv.getContext("2d");g.clearRect(0,0,cv.width,cv.height);
+ if(poly.length<3)return;
+ const xs=poly.map(p=>p[0]).concat(pts.map(p=>p[0])),ys=poly.map(p=>p[1]).concat(pts.map(p=>p[1]));
+ const x0=Math.min(...xs)-2,x1=Math.max(...xs)+2,y0=Math.min(...ys)-150,y1=Math.max(...ys)+150;
+ const X=v=>50+(v-x0)/(x1-x0)*(cv.width-70),Y=v=>cv.height-35-(v-y0)/(y1-y0)*(cv.height-55);
+ g.strokeStyle="#ddd";g.fillStyle="#555";g.font="12px sans-serif";
+ for(let y=Math.ceil(y0/100)*100;y<=y1;y+=100){g.beginPath();g.moveTo(50,Y(y));g.lineTo(cv.width-20,Y(y));g.stroke();g.fillText(y,8,Y(y)+4)}
+ for(let x=Math.ceil(x0);x<=x1;x+=2){g.beginPath();g.moveTo(X(x),20);g.lineTo(X(x),cv.height-35);g.stroke();g.fillText(x,X(x)-8,cv.height-18)}
+ g.fillText("CG (in aft of datum)",cv.width/2-50,cv.height-3);
+ g.beginPath();poly.forEach((p,i)=>i?g.lineTo(X(p[0]),Y(p[1])):g.moveTo(X(p[0]),Y(p[1])));g.closePath();
+ g.fillStyle="#2a7de133";g.fill();g.strokeStyle="#2a7de1";g.lineWidth=2;g.stroke();
+ g.beginPath();g.moveTo(X(pts[0][0]),Y(pts[0][1]));g.lineTo(X(pts[1][0]),Y(pts[1][1]));g.strokeStyle="#c00";g.lineWidth=1.5;g.stroke();
+ [["TO","#c00"],["LDG","#e67e00"]].forEach((n,i)=>{g.beginPath();g.arc(X(pts[i][0]),Y(pts[i][1]),6,0,7);g.fillStyle=n[1];g.fill();g.fillStyle="#000";g.fillText(n[0],X(pts[i][0])+8,Y(pts[i][1])+4)});
+}
+function saveCfg(){const n={};Object.keys(DEF).filter(k=>k!="env").forEach(k=>n[k]={l:DEF[k].l,v:cfgv(k)});n.env=document.getElementById("env").value;n.ver=document.getElementById("ver").checked;C=n;localStorage.setItem("sr22tcfg",JSON.stringify(n));alert("Saved on this device.")}
+function resetCfg(){if(confirm("Reset to placeholders?")){localStorage.removeItem("sr22tcfg");C=JSON.parse(JSON.stringify(DEF));build();calc()}}
+build();calc();
+</script></body></html>
